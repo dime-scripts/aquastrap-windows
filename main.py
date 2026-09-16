@@ -13,7 +13,7 @@ VERSIONS=ROBLOX/"Versions"
 MASTER=BASE/"ClientAppSettings.json"
 APP_EXE="RobloxPlayerBeta.exe"
 PROTOCOL="roblox-player:1+launchmode:app"
-VERSION="v0.2"
+VERSION="v0.3"
 REPO="dime-scripts/aquastrap-windows"
 VERURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/VERSION"
 MAINURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/main.py"
@@ -225,6 +225,7 @@ def lenient_json(text):
         out.append(c);i+=1
     return json.loads(re.sub(r",(\s*[}\]])",r"\1","".join(out)))
 CHANGELOG=[
+ ("v0.3",["Smoother 60 fps backgrounds and loading screen","Fixed glitched/clipped text when switching tabs quickly","Tab switching is instant and can't overlap itself"]),
  ("v0.2",["Major performance fix: animations are smooth again","No more screen tearing or slow page switching","Idle interface uses almost no CPU"]),
  ("v0.1",["Windows port of the Aquastrap launcher","Flags deploy to every Roblox version folder automatically","Flags survive Roblox updates and re-sync on launch","One click launch with live Roblox status","Same snowy late night interface"])]
 def load_settings():
@@ -271,7 +272,7 @@ class AquaButton(tk.Canvas):
                 if self.pulse and self.on:
                     pr=0.5+0.5*math.sin(time.time()*3.2)
                     self._draw(self.ht,pr)
-                    self.after(40,self._tick)
+                    self.after(25,self._tick)
                 elif abs(self.tgt-self.ht)>0.002:
                     self._draw(self.ht,0.0)
                     self.after(16,self._tick)
@@ -385,13 +386,16 @@ class Page(tk.Frame):
     def _tick(self):
         try:
             if self.winfo_exists():
-                if self.winfo_ismapped():self._draw()
-                self.after(66,self._tick)
+                if self.winfo_ismapped():
+                    self._draw()
+                    self.after(16,self._tick)
+                else:
+                    self.after(200,self._tick)
         except tk.TclError:
             try:self.after(200,self._tick)
             except tk.TclError:pass
     def _draw(self,*a):
-        self.phase+=0.024
+        self.phase+=0.006
         for it,layer in self.waves:
             self.c.coords(it,*self._wave_poly(layer))
         for q in self.rain:
@@ -402,12 +406,12 @@ class Page(tk.Frame):
                 if show:self.c.coords(it,x,yy,x+2,yy+5)
                 elif vis[j]:self.c.coords(it,x,-999,x+2,-994)
                 vis[j]=show
-            q[1]=y+spd*1.32
+            q[1]=y+spd*0.32
             if q[1]>self.CH:q[1]=-40-ln*7;q[0]=(q[0]+97)%self.CW
         for q in self.snow:
             it,x,y,spd,ph=q
-            yy=y+spd*1.32 if y+spd*1.32<=self.CH else -6
-            xx=x+math.sin(self.phase*1.4+ph)*0.8
+            yy=y+spd*0.32 if y+spd*0.32<=self.CH else -6
+            xx=x+math.sin(self.phase*1.4+ph)*0.19
             self.c.coords(it,xx,yy,xx+2,yy+2);q[1]=yy;q[2]=xx
 class TopBar(tk.Canvas):
     def __init__(self,master,logo):
@@ -496,17 +500,17 @@ class Sidebar(tk.Canvas):
             if n==name:self.active=i
     def _tick(self):
         try:
-            self.phase+=0.036
+            self.phase+=0.014
             for it,layer in self.waves:
                 self.coords(it,*self._wave_poly(layer))
             for b in self.bub:
                 it,x,y,r,sp=b
-                y-=sp*2.0;x+=math.sin(self.phase*2+y)*0.36
+                y-=sp*0.76;x+=math.sin(self.phase*2+y)*0.14
                 if y< -4:y=self.H+4;x=14+os.urandom(1)[0]%(self.W-28)
                 b[1]=x;b[2]=y
                 self.coords(it,x-r,y-r,x+r,y+r)
             ty=127+self.active*58-23
-            self.pill_y+=(ty-self.pill_y)*0.31
+            self.pill_y+=(ty-self.pill_y)*0.17
             self.coords(self.pill,14,self.pill_y,self.W-14,self.pill_y+46)
             self.tag_raise(self.pill)
             sig=(self.active,self.hover)
@@ -518,7 +522,7 @@ class Sidebar(tk.Canvas):
                     else:c=DIM
                     self.itemconfig(it,fill=c)
                     self.tag_raise(it)
-            self.after(66,self._tick)
+            self.after(25,self._tick)
         except tk.TclError:
             pass
 class AquaDialog(tk.Toplevel):
@@ -621,7 +625,7 @@ class Loading(tk.Frame):
         self.target=max(self.target,min(1.0,v))
     def _tick(self):
         try:
-            self.phase+=0.019
+            self.phase+=0.01
             for it,layer in self.waves:
                 self.c.coords(it,*self._wave_poly(layer))
             for q in self.rain:
@@ -632,19 +636,19 @@ class Loading(tk.Frame):
                     if show:self.c.coords(it,x,yy,x+3,yy+5)
                     elif vis[j]:self.c.coords(it,x,-999,x+3,-994)
                     vis[j]=show
-                q[1]=y+spd*1.2
+                q[1]=y+spd*0.61
                 if q[1]>WINH:
                     q[1]=-40-ln*7;q[0]=(q[0]+137)%1000
             for it,x,y,spd,ph in self.snow:
-                yy=y+spd*1.2
-                xx=x+math.sin(self.phase*1.4+ph)*0.84
+                yy=y+spd*0.61
+                xx=x+math.sin(self.phase*1.4+ph)*0.42
                 if yy>WINH:yy=-6
                 q[3]=spd;self.c.coords(it,xx,yy,xx+3,yy+3);q[1]=yy;q[2]=xx
             self.tic+=1
-            if self.tic%53==0:
+            if self.tic%106==0:
                 self.idx=(self.idx+1)%len(LOAD_LINES)
                 self.c.itemconfig(self.status,text=LOAD_LINES[self.idx])
-            self.val+=(self.target-self.val)*0.18
+            self.val+=(self.target-self.val)*0.11
             lit=int(self.val*22)
             for i,it in enumerate(self.segs):
                 if i<lit:
@@ -653,9 +657,9 @@ class Loading(tk.Frame):
                 else:
                     self.c.itemconfig(it,fill="#0b2636")
             self.c.itemconfig(self.pct,text=f"{int(round(self.val*100))}%")
-            self.blink+=0.05
+            self.blink+=0.03
             self.c.itemconfig(self.press,state="normal" if math.sin(self.blink)>-0.3 else "hidden")
-            self.after(40,self._tick)
+            self.after(20,self._tick)
         except tk.TclError:
             pass
 class App(tk.Tk):
@@ -707,6 +711,13 @@ class App(tk.Tk):
                 self.splash.set_progress(prog)
                 self.after(460,lambda:run_stage(i+1))
             else:
+                for nm,q in self.pages.items():
+                    q.place(in_=self.content,x=0,y=0,relwidth=1,relheight=1)
+                    try:q.lower()
+                    except tk.TclError:pass
+                self.update_idletasks()
+                for nm,q in self.pages.items():
+                    if nm!="home":q.place_forget()
                 self.pages["home"].place(in_=self.content,x=0,y=0,relwidth=1,relheight=1)
                 self.pages["home"].lift()
                 self.splash.set_progress(0.94)
@@ -874,22 +885,33 @@ class App(tk.Tk):
             except Exception:pass
             self._ui(lambda:self.toast("UPDATE INSTALL FAILED",False))
     def show(self,name):
-        if name==self.current:return
-        p=self.pages[name];old=self.pages[self.current]
+        if name==self.current or name not in self.pages:return
+        self._slide=getattr(self,"_slide",0)+1
+        token=self._slide
+        p=self.pages[name];old=self.pages.get(self.current)
+        self.current=name
+        self.sb.set_active(name)
+        self.focus_set()
+        if old is not None and old is not p:
+            p.place(in_=self.content,x=0,y=0,relwidth=1,relheight=1)
+            try:p.lower(old)
+            except tk.TclError:pass
+            self.update_idletasks()
+            old.place_forget()
         p.place(in_=self.content,x=34,y=0,relwidth=1,relheight=1)
         p.lift()
-        self.sb.set_active(name)
-        self.current=name
-        self.focus_set()
         def step(i):
+            if self._slide!=token:return
             if i>0:
-                p.place_configure(x=round(34*i/8))
+                p.place_configure(x=round(34*i/5))
                 self.after(10,lambda:step(i-1))
             else:
-                p.place_configure(x=0)
-                old.place_forget()
+                p.place_configure(x=0,y=0,relwidth=1,relheight=1)
                 p.lift()
-        step(8)
+                for q in self.pages.values():
+                    if q is not p:q.place_forget()
+                self.update_idletasks()
+        step(5)
     def toast(self,msg,ok=True):
         if self._toast:
             try:self._toast.destroy()
@@ -967,7 +989,7 @@ class App(tk.Tk):
                     else:col=BAD;r=5
                     card["dot"].coords(card["it"],9-r,9-r,9+r,9+r)
                     card["dot"].itemconfig(card["it"],fill=col)
-            self.after(60,lambda:self._home_tick(i+1))
+            self.after(40,lambda:self._home_tick(i+1))
         except tk.TclError:
             pass
     def _set_card(self,c,ok,yes,no):
