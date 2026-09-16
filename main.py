@@ -13,7 +13,7 @@ VERSIONS=ROBLOX/"Versions"
 MASTER=BASE/"ClientAppSettings.json"
 APP_EXE="RobloxPlayerBeta.exe"
 PROTOCOL="roblox-player:1+launchmode:app"
-VERSION="v0.3"
+VERSION="v0.4"
 REPO="dime-scripts/aquastrap-windows"
 VERURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/VERSION"
 MAINURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/main.py"
@@ -57,6 +57,10 @@ def _ensure_font():
             import ctypes
             fr_private=0x10
             ctypes.windll.gdi32.AddFontResourceExW(str(FONTFILE),fr_private,0)
+            HWND_BROADCAST=0xFFFF;WM_FONTCHANGE=0x001D
+            user32=ctypes.windll.user32
+            user32.SendMessageTimeoutW.restype=ctypes.c_void_p
+            user32.SendMessageTimeoutW(HWND_BROADCAST,WM_FONTCHANGE,0,0,0x0002,1000,None)
         except Exception:pass
     except Exception as e:
         warn(f"font setup failed: {e}")
@@ -74,9 +78,10 @@ def FS(n,b=False):
 def lerp(a,b,t):
     a=a.lstrip("#");b=b.lstrip("#")
     return "#%02x%02x%02x"%tuple(round(int(a[i:i+2],16)+(int(b[i:i+2],16)-int(a[i:i+2],16))*t) for i in (0,2,4))
+def rrect_pts(x1,y1,x2,y2,r):
+    return [x1+r,y1,x2-r,y1,x2,y1,x2,y1+r,x2,y2-r,x2,y2,x2-r,y2,x1+r,y2,x1,y2,x1,y2-r,x1,y1+r,x1,y1]
 def rrect(c,x1,y1,x2,y2,r,**k):
-    p=[x1+r,y1,x2-r,y1,x2,y1,x2,y1+r,x2,y2-r,x2,y2,x2-r,y2,x1+r,y2,x1,y2,x1,y2-r,x1,y1+r,x1,y1]
-    return c.create_polygon(p,smooth=True,**k)
+    return c.create_polygon(rrect_pts(x1,y1,x2,y2,r),smooth=True,**k)
 def write_file(path,text):
     try:
         path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -225,6 +230,7 @@ def lenient_json(text):
         out.append(c);i+=1
     return json.loads(re.sub(r",(\s*[}\]])",r"\1","".join(out)))
 CHANGELOG=[
+ ("v0.4",["Tab switching is now instant - plain tkinter, no sliding overlap","No more screen tearing or two tabs showing at once","Pixel font registers system-wide so every letter is fully drawn"]),
  ("v0.3",["Smoother 60 fps backgrounds and loading screen","Fixed glitched/clipped text when switching tabs quickly","Tab switching is instant and can't overlap itself"]),
  ("v0.2",["Major performance fix: animations are smooth again","No more screen tearing or slow page switching","Idle interface uses almost no CPU"]),
  ("v0.1",["Windows port of the Aquastrap launcher","Flags deploy to every Roblox version folder automatically","Flags survive Roblox updates and re-sync on launch","One click launch with live Roblox status","Same snowy late night interface"])]
@@ -497,7 +503,14 @@ class Sidebar(tk.Canvas):
         return -1
     def set_active(self,name):
         for i,(n,l) in enumerate(self.tabs):
-            if n==name:self.active=i
+            if n==name:
+                self.active=i
+                self.pill_y=127+i*58-23
+                try:self.coords(self.pill,*rrect_pts(14,self.pill_y,self.W-14,self.pill_y+46,13))
+                except tk.TclError:pass
+                for j,it in enumerate(self.labels):
+                    self.itemconfig(it,fill="#04141d" if j==i else (INK if self.hover==j else DIM))
+                for it in self.labels:self.tag_raise(it)
     def _tick(self):
         try:
             self.phase+=0.014
@@ -511,7 +524,7 @@ class Sidebar(tk.Canvas):
                 self.coords(it,x-r,y-r,x+r,y+r)
             ty=127+self.active*58-23
             self.pill_y+=(ty-self.pill_y)*0.17
-            self.coords(self.pill,14,self.pill_y,self.W-14,self.pill_y+46)
+            self.coords(self.pill,*rrect_pts(14,self.pill_y,self.W-14,self.pill_y+46,13))
             self.tag_raise(self.pill)
             sig=(self.active,self.hover)
             if sig!=self._sig:
@@ -521,7 +534,7 @@ class Sidebar(tk.Canvas):
                     elif i==self.hover:c=INK
                     else:c=DIM
                     self.itemconfig(it,fill=c)
-                    self.tag_raise(it)
+            for it in self.labels:self.tag_raise(it)
             self.after(25,self._tick)
         except tk.TclError:
             pass
@@ -886,32 +899,17 @@ class App(tk.Tk):
             self._ui(lambda:self.toast("UPDATE INSTALL FAILED",False))
     def show(self,name):
         if name==self.current or name not in self.pages:return
-        self._slide=getattr(self,"_slide",0)+1
-        token=self._slide
         p=self.pages[name];old=self.pages.get(self.current)
-        self.current=name
-        self.sb.set_active(name)
-        self.focus_set()
         if old is not None and old is not p:
-            p.place(in_=self.content,x=0,y=0,relwidth=1,relheight=1)
-            try:p.lower(old)
-            except tk.TclError:pass
-            self.update_idletasks()
             old.place_forget()
-        p.place(in_=self.content,x=34,y=0,relwidth=1,relheight=1)
+        p.place(in_=self.content,x=0,y=0,relwidth=1,relheight=1)
+        for q in self.pages.values():
+            if q is not p:q.place_forget()
         p.lift()
-        def step(i):
-            if self._slide!=token:return
-            if i>0:
-                p.place_configure(x=round(34*i/5))
-                self.after(10,lambda:step(i-1))
-            else:
-                p.place_configure(x=0,y=0,relwidth=1,relheight=1)
-                p.lift()
-                for q in self.pages.values():
-                    if q is not p:q.place_forget()
-                self.update_idletasks()
-        step(5)
+        self.sb.set_active(name)
+        self.current=name
+        self.focus_set()
+        self.update_idletasks()
     def toast(self,msg,ok=True):
         if self._toast:
             try:self._toast.destroy()
