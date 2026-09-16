@@ -25,8 +25,11 @@ Python 3.8 or newer – must be added to PATH during installation
 Internet connection (for the initial download and updates)
 
 Installation
+
 curl -fsSL https://raw.githubusercontent.com/dime-scripts/aquastrap-windows/refs/heads/main/INSTALL.bat -o "%TEMP%\install-aqua.bat" && "%TEMP%\install-aqua.bat"
+
 or if you dont have curl use powershell as admin:
+
 iwr https://raw.githubusercontent.com/dime-scripts/aquastrap-windows/refs/heads/main/INSTALL.bat -OutFile "$env:TEMP\install-aqua.bat"; & "$env:TEMP\install-aqua.bat"
 
 Run INSTALL.bat (double‑click).
