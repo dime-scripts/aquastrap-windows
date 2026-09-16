@@ -13,7 +13,7 @@ VERSIONS=ROBLOX/"Versions"
 MASTER=BASE/"ClientAppSettings.json"
 APP_EXE="RobloxPlayerBeta.exe"
 PROTOCOL="roblox-player:1+launchmode:app"
-VERSION="v0.1"
+VERSION="v0.2"
 REPO="dime-scripts/aquastrap-windows"
 VERURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/VERSION"
 MAINURL=f"https://raw.githubusercontent.com/{REPO}/refs/heads/main/main.py"
@@ -225,6 +225,7 @@ def lenient_json(text):
         out.append(c);i+=1
     return json.loads(re.sub(r",(\s*[}\]])",r"\1","".join(out)))
 CHANGELOG=[
+ ("v0.2",["Major performance fix: animations are smooth again","No more screen tearing or slow page switching","Idle interface uses almost no CPU"]),
  ("v0.1",["Windows port of the Aquastrap launcher","Flags deploy to every Roblox version folder automatically","Flags survive Roblox updates and re-sync on launch","One click launch with live Roblox status","Same snowy late night interface"])]
 def load_settings():
     d={"auto_update":True,"import_replaces":False}
@@ -235,7 +236,7 @@ class AquaButton(tk.Canvas):
     def __init__(self,master,text,command=None,w=150,h=38,fs=11,top="#2ee6f5",bot="#0891b2",htop="#a5f3fc",hbot="#22d3ee",fg="#031820",rad=11,pulse=False):
         super().__init__(master,width=w,height=h,highlightthickness=0,bd=0,bg=master.cget("bg"))
         self.w=w;self.h=h;self.text=text;self.command=command;self.t0=top;self.b0=bot;self.ht0=htop;self.hb0=hbot;self.fg=fg;self.rad=rad;self.fs=fs
-        self.ht=0.0;self.tgt=0.0;self.down=False;self.pulse=pulse;self.on=True;self.running=False
+        self.ht=0.0;self.tgt=0.0;self.down=False;self.pulse=pulse;self.on=True;self.running=False;self.need=True
         self.bind("<Enter>",lambda e:setattr(self,"tgt",1.0))
         self.bind("<Leave>",lambda e:(setattr(self,"tgt",0.0),setattr(self,"down",False)))
         self.bind("<Button-1>",lambda e:setattr(self,"down",True))
@@ -252,29 +253,39 @@ class AquaButton(tk.Canvas):
                 error(f"button action failed: {ex}")
                 self.tgt=0.0
     def set_text(self,t):
-        self.text=t
+        self.text=t;self.need=True
     def set_enabled(self,v):
-        self.on=v
+        self.on=v;self.need=True
     def set_running(self,v):
         self.running=v
         self.text="RUNNING" if v else "LAUNCH"
+        self.need=True
     def _map(self,e):
         try:self._draw(self.ht,0)
         except tk.TclError:pass
     def _tick(self):
         try:
-            if self.winfo_exists():
-                if self.winfo_ismapped():
-                    self.ht+=(self.tgt-self.ht)*0.28
-                    pr=(0.5+0.5*math.sin(time.time()*3.2)) if self.pulse and self.on else 0.0
+            if not self.winfo_exists():return
+            if self.winfo_ismapped():
+                self.ht+=(self.tgt-self.ht)*0.28
+                if self.pulse and self.on:
+                    pr=0.5+0.5*math.sin(time.time()*3.2)
                     self._draw(self.ht,pr)
+                    self.after(40,self._tick)
+                elif abs(self.tgt-self.ht)>0.002:
+                    self._draw(self.ht,0.0)
+                    self.after(16,self._tick)
+                elif self.need:
+                    self.need=False
+                    self._draw(self.ht,0.0)
                     self.after(16,self._tick)
                 else:
-                    self.after(60,self._tick)
+                    self.after(150,self._tick)
             else:
-                return
+                self.need=True
+                self.after(150,self._tick)
         except tk.TclError:
-            try:self.after(120,self._tick)
+            try:self.after(200,self._tick)
             except tk.TclError:return
     def _draw(self,h,p):
         self.delete("all")
@@ -331,10 +342,10 @@ class Page(tk.Frame):
         for y in range(0,self.CH,3):
             self.c.create_line(0,y,self.CW,y,fill="#0a1f2c",stipple="gray12")
         self.waves=[]
-        for gb,amp,spd,col,st in ((WINH-180,26,0.9,"#0a2636","gray12"),(WINH-132,20,1.4,"#0d3145","gray25"),(WINH-78,15,2.0,"#123f56","gray50")):
-            base=gb-TOPH
-            it=self.c.create_polygon(self._pts(base,amp,0),fill=col,stipple=st,outline="")
-            self.waves.append((it,base,amp,spd))
+        for layer,(gb,amp,spd,col,st) in enumerate(((WINH-180,26,0.9,"#0a2636","gray12"),(WINH-132,20,1.4,"#0d3145","gray25"),(WINH-78,15,2.0,"#123f56","gray50"))):
+            self.phase=0.0
+            it=self.c.create_polygon(self._wave_poly(layer),fill=col,stipple=st,outline="")
+            self.waves.append((it,layer))
         self.rain=[]
         for i in range(40):
             x=(i*131)%self.CW;y=-((i*97)%self.CH);spd=4+(i%7);ln=2+(i%3)
@@ -342,45 +353,61 @@ class Page(tk.Frame):
             for j in range(ln):
                 it=self.c.create_rectangle(x,-999,x+2,-994,fill=(["#0e3a52","#155e75","#1d7894","#22d3ee"][i%4] if j==0 else "#0e3a52"),outline="")
                 items.append(it)
-            self.rain.append([x,y,spd,ln,items])
+            self.rain.append([x,y,spd,ln,items,[False]*ln])
         self.snow=[]
         for i in range(26):
             x=(i*73)%self.CW;y=(i*67)%self.CH;spd=0.4+(i%4)*0.3;ph=i
             it=self.c.create_rectangle(x,y,x+2,y+2,fill="#dff6ff",outline="",stipple="gray50")
             self.snow.append([it,x,y,spd,ph])
         self.after(50,self._tick)
-    def _pts(self,base,amp,ph):
+    def _surf(self,x,base,amp,ph):
+        gx=self.xoff+x
+        return base+math.sin(gx*0.018+ph)*amp+math.sin(gx*0.045+ph*1.7)*amp*0.35
+    def _wave_poly(self,layer):
+        xs=list(range(0,self.CW+1,10))
+        spec=((WINH-180,26,0.9),(WINH-132,20,1.4),(WINH-78,15,2.0))
+        top=[]
+        for x in xs:
+            base,amp,spd=spec[layer]
+            top.append(self._surf(x,base-TOPH,amp,self.phase*spd))
+        if layer<2:
+            bot=[]
+            nb,na,ns=spec[layer+1]
+            for x in xs:
+                yt=self._surf(x,nb-TOPH,na,self.phase*ns)
+                bot.append(max(yt,top[len(bot)]))
+        else:
+            bot=[self.CH]*len(xs)
         pts=[]
-        for x in range(0,self.CW+1,10):
-            gx=self.xoff+x
-            y=base+math.sin(gx*0.018+ph)*amp+math.sin(gx*0.045+ph*1.7)*amp*0.35
-            pts+=[x,y]
-        pts+=[self.CW,self.CH,0,self.CH]
+        for x,y in zip(xs,top):pts+=[x,y]
+        for x,y in zip(reversed(xs),reversed(bot)):pts+=[x,y]
         return pts
     def _tick(self):
         try:
             if self.winfo_exists():
                 if self.winfo_ismapped():self._draw()
-                self.after(50,self._tick)
+                self.after(66,self._tick)
         except tk.TclError:
             try:self.after(200,self._tick)
             except tk.TclError:pass
     def _draw(self,*a):
-        self.phase+=0.018
-        for it,base,amp,spd in self.waves:
-            self.c.coords(it,*self._pts(base,amp,self.phase*spd))
+        self.phase+=0.024
+        for it,layer in self.waves:
+            self.c.coords(it,*self._wave_poly(layer))
         for q in self.rain:
-            x,y,spd,ln,items=q
+            x,y,spd,ln,items,vis=q
             for j,it in enumerate(items):
                 yy=y-j*7
-                if -10<yy<self.CH:self.c.coords(it,x,yy,x+2,yy+5)
-                else:self.c.coords(it,x,-999,x+2,-994)
-            q[1]=y+spd
+                show=-10<yy<self.CH
+                if show:self.c.coords(it,x,yy,x+2,yy+5)
+                elif vis[j]:self.c.coords(it,x,-999,x+2,-994)
+                vis[j]=show
+            q[1]=y+spd*1.32
             if q[1]>self.CH:q[1]=-40-ln*7;q[0]=(q[0]+97)%self.CW
         for q in self.snow:
             it,x,y,spd,ph=q
-            yy=y+spd if y+spd<=self.CH else -6
-            xx=x+math.sin(self.phase*1.4+ph)*0.6
+            yy=y+spd*1.32 if y+spd*1.32<=self.CH else -6
+            xx=x+math.sin(self.phase*1.4+ph)*0.8
             self.c.coords(it,xx,yy,xx+2,yy+2);q[1]=yy;q[2]=xx
 class TopBar(tk.Canvas):
     def __init__(self,master,logo):
@@ -411,13 +438,13 @@ class Sidebar(tk.Canvas):
         self.W=214;self.H=WINH
         super().__init__(root,width=self.W,height=self.H,bg=SIDEBAR,highlightthickness=0,bd=0)
         self.app=app;self.tabs=tabs;self.active=0;self.pill_y=104;self.hover=-1
-        self.phase=0.0
+        self.phase=0.0;self._sig=None
         self.waves=[]
         spec=[(self.H-180,26,0.9,"#0a2636","gray12"),(self.H-132,20,1.4,"#0d3145","gray25"),(self.H-78,15,2.0,"#11435a","gray50")]
-        for base,amp,spd,col,st in spec:
-            pts=self._pts(base,amp,spd*0)
-            it=self.create_polygon(pts,fill=col,stipple=st,outline="")
-            self.waves.append((it,base,amp,spd))
+        for layer,(base,amp,spd,col,st) in enumerate(spec):
+            self.phase=0.0
+            it=self.create_polygon(self._wave_poly(layer),fill=col,stipple=st,outline="")
+            self.waves.append((it,layer))
         self.bub=[]
         for _ in range(18):
             x=14+os.urandom(1)[0]%(self.W-28);y=os.urandom(1)[0]%self.H;r=1+(os.urandom(1)[0]%3)*0.7;sp=0.25+(os.urandom(1)[0]%30)/60
@@ -437,12 +464,21 @@ class Sidebar(tk.Canvas):
         self.bind("<Motion>",self._motion)
         self.bind("<Leave>",lambda e:setattr(self,"hover",-1))
         self.after(33,self._tick)
-    def _pts(self,base,amp,ph):
+    def _surf(self,x,base,amp,ph):
+        return base+math.sin(x*0.018+ph)*amp+math.sin(x*0.045+ph*1.7)*amp*0.35
+    def _wave_poly(self,layer):
+        xs=list(range(0,self.W+1,8))
+        spec=((self.H-180,26,0.9),(self.H-132,20,1.4),(self.H-78,15,2.0))
+        base,amp,spd=spec[layer]
+        top=[self._surf(x,base,amp,self.phase*spd) for x in xs]
+        if layer<2:
+            nb,na,ns=spec[layer+1]
+            bot=[max(self._surf(x,nb,na,self.phase*ns),top[i]) for i,x in enumerate(xs)]
+        else:
+            bot=[self.H]*len(xs)
         pts=[]
-        for x in range(0,self.W+1,8):
-            y=base+math.sin(x*0.018+ph)*amp+math.sin(x*0.045+ph*1.7)*amp*0.35
-            pts += [x,y]
-        pts += [self.W,self.H,0,self.H]
+        for x,y in zip(xs,top):pts+=[x,y]
+        for x,y in zip(reversed(xs),reversed(bot)):pts+=[x,y]
         return pts
     def _motion(self,e):
         self.hover=self._hit(e.y)
@@ -460,26 +496,29 @@ class Sidebar(tk.Canvas):
             if n==name:self.active=i
     def _tick(self):
         try:
-            self.phase+=0.018
-            for it,base,amp,spd in self.waves:
-                self.coords(it,*self._pts(base,amp,self.phase*spd))
+            self.phase+=0.036
+            for it,layer in self.waves:
+                self.coords(it,*self._wave_poly(layer))
             for b in self.bub:
                 it,x,y,r,sp=b
-                y-=sp;x+=math.sin(self.phase*2+y)*0.18
+                y-=sp*2.0;x+=math.sin(self.phase*2+y)*0.36
                 if y< -4:y=self.H+4;x=14+os.urandom(1)[0]%(self.W-28)
                 b[1]=x;b[2]=y
                 self.coords(it,x-r,y-r,x+r,y+r)
             ty=127+self.active*58-23
-            self.pill_y+=(ty-self.pill_y)*0.22
+            self.pill_y+=(ty-self.pill_y)*0.31
             self.coords(self.pill,14,self.pill_y,self.W-14,self.pill_y+46)
             self.tag_raise(self.pill)
-            for i,it in enumerate(self.labels):
-                if i==self.active:c="#04141d"
-                elif i==self.hover:c=INK
-                else:c=DIM
-                self.itemconfig(it,fill=c)
-                self.tag_raise(it)
-            self.after(33,self._tick)
+            sig=(self.active,self.hover)
+            if sig!=self._sig:
+                self._sig=sig
+                for i,it in enumerate(self.labels):
+                    if i==self.active:c="#04141d"
+                    elif i==self.hover:c=INK
+                    else:c=DIM
+                    self.itemconfig(it,fill=c)
+                    self.tag_raise(it)
+            self.after(66,self._tick)
         except tk.TclError:
             pass
 class AquaDialog(tk.Toplevel):
@@ -531,9 +570,10 @@ class Loading(tk.Frame):
         for y in range(0,WINH,3):
             self.c.create_line(0,y,WINW,y,fill="#071220",stipple="gray12")
         self.waves=[]
-        for base,amp,spd,col,st in ((WINH-80,22,0.9,"#0a2636","gray12"),(WINH-48,18,1.4,"#0d3145","gray25"),(WINH-18,14,2.0,"#123f56","gray50")):
-            it=self.c.create_polygon(self._pts(base,amp,0),fill=col,stipple=st,outline="")
-            self.waves.append((it,base,amp,spd))
+        for layer,(base,amp,spd,col,st) in enumerate(((WINH-80,22,0.9,"#0a2636","gray12"),(WINH-48,18,1.4,"#0d3145","gray25"),(WINH-18,14,2.0,"#123f56","gray50"))):
+            self.phase=0.0
+            it=self.c.create_polygon(self._wave_poly(layer),fill=col,stipple=st,outline="")
+            self.waves.append((it,layer))
         self.rain=[]
         for i in range(64):
             x=(i*137)%WINW;y=-((i*89)%700);spd=5+(i%9);ln=3+(i%5)
@@ -542,7 +582,7 @@ class Loading(tk.Frame):
             for j in range(ln):
                 it=self.c.create_rectangle(x,-999,x+3,-994,fill=(head if j==0 else "#0e3a52"),outline="")
                 items.append(it)
-            self.rain.append([x,y,spd,ln,head,items])
+            self.rain.append([x,y,spd,ln,head,items,[False]*ln])
         self.snow=[]
         for i in range(46):
             x=(i*71)%WINW;y=(i*61)%WINH;spd=0.6+(i%5)*0.35;ph=i*0.7
@@ -561,39 +601,47 @@ class Loading(tk.Frame):
         self.press=self.c.create_text(500,442,text="PRESS START",fill=ACC,font=FS(15,True))
         self.target=0.0;self.val=0.0;self.phase=0.0;self.idx=0;self.tic=0.0;self.blink=0.0
         self._tick()
-    def _pts(self,base,amp,ph):
+    def _surf(self,x,base,amp,ph):
+        return base+math.sin(x*0.016+ph)*amp+math.sin(x*0.041+ph*1.7)*amp*0.35
+    def _wave_poly(self,layer):
+        xs=list(range(0,WINW+1,10))
+        spec=((WINH-80,22,0.9),(WINH-48,18,1.4),(WINH-18,14,2.0))
+        base,amp,spd=spec[layer]
+        top=[self._surf(x,base,amp,self.phase*spd) for x in xs]
+        if layer<2:
+            nb,na,ns=spec[layer+1]
+            bot=[max(self._surf(x,nb,na,self.phase*ns),top[i]) for i,x in enumerate(xs)]
+        else:
+            bot=[WINH]*len(xs)
         pts=[]
-        for x in range(0,WINW+1,10):
-            y=base+math.sin(x*0.016+ph)*amp+math.sin(x*0.041+ph*1.7)*amp*0.35
-            pts+=[x,y]
-        pts+=[WINW,WINH,0,WINH]
+        for x,y in zip(xs,top):pts+=[x,y]
+        for x,y in zip(reversed(xs),reversed(bot)):pts+=[x,y]
         return pts
     def set_progress(self,v):
         self.target=max(self.target,min(1.0,v))
     def _tick(self):
         try:
-            self.phase+=0.016
-            for it,base,amp,spd in self.waves:
-                self.c.coords(it,*self._pts(base,amp,self.phase*spd))
+            self.phase+=0.019
+            for it,layer in self.waves:
+                self.c.coords(it,*self._wave_poly(layer))
             for q in self.rain:
-                x,y,spd,ln,head,items=q
+                x,y,spd,ln,head,items,vis=q
                 for j,it in enumerate(items):
                     yy=y-j*7
-                    if -10<yy<600:
-                        self.c.coords(it,x,yy,x+3,yy+5)
-                    else:
-                        self.c.coords(it,x,-999,x+3,-994)
-                q[1]=y+spd
+                    show=-10<yy<600
+                    if show:self.c.coords(it,x,yy,x+3,yy+5)
+                    elif vis[j]:self.c.coords(it,x,-999,x+3,-994)
+                    vis[j]=show
+                q[1]=y+spd*1.2
                 if q[1]>WINH:
                     q[1]=-40-ln*7;q[0]=(q[0]+137)%1000
-                    x=q[0]
             for it,x,y,spd,ph in self.snow:
-                yy=y+spd
-                xx=x+math.sin(self.phase*1.4+ph)*0.7
+                yy=y+spd*1.2
+                xx=x+math.sin(self.phase*1.4+ph)*0.84
                 if yy>WINH:yy=-6
                 q[3]=spd;self.c.coords(it,xx,yy,xx+3,yy+3);q[1]=yy;q[2]=xx
             self.tic+=1
-            if self.tic%64==0:
+            if self.tic%53==0:
                 self.idx=(self.idx+1)%len(LOAD_LINES)
                 self.c.itemconfig(self.status,text=LOAD_LINES[self.idx])
             self.val+=(self.target-self.val)*0.18
@@ -607,7 +655,7 @@ class Loading(tk.Frame):
             self.c.itemconfig(self.pct,text=f"{int(round(self.val*100))}%")
             self.blink+=0.05
             self.c.itemconfig(self.press,state="normal" if math.sin(self.blink)>-0.3 else "hidden")
-            self.after(33,self._tick)
+            self.after(40,self._tick)
         except tk.TclError:
             pass
 class App(tk.Tk):
@@ -909,16 +957,17 @@ class App(tk.Tk):
         self._home_tick(0)
     def _home_tick(self,i):
         try:
-            s=0.5+0.5*math.sin(time.time()*2)
-            self.home_title.config(fg=lerp("#67e8f9","#0ea5e9",s))
-            for card in (self.c_dir,self.c_exe,self.c_cfg):
-                st=card["state"]
-                if st is None:col="#475569";r=5
-                elif st:col=OK;r=4.5+s*1.6
-                else:col=BAD;r=5
-                card["dot"].coords(card["it"],9-r,9-r,9+r,9+r)
-                card["dot"].itemconfig(card["it"],fill=col)
-            self.after(40,lambda:self._home_tick(i+1))
+            if self.current=="home":
+                s=0.5+0.5*math.sin(time.time()*2)
+                self.home_title.config(fg=lerp("#67e8f9","#0ea5e9",s))
+                for card in (self.c_dir,self.c_exe,self.c_cfg):
+                    st=card["state"]
+                    if st is None:col="#475569";r=5
+                    elif st:col=OK;r=4.5+s*1.6
+                    else:col=BAD;r=5
+                    card["dot"].coords(card["it"],9-r,9-r,9+r,9+r)
+                    card["dot"].itemconfig(card["it"],fill=col)
+            self.after(60,lambda:self._home_tick(i+1))
         except tk.TclError:
             pass
     def _set_card(self,c,ok,yes,no):
